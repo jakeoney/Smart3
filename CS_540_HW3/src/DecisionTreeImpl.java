@@ -19,7 +19,7 @@ public class DecisionTreeImpl extends DecisionTree {
 	private Map<String, List<String>> attributeValues; // map to ordered
 														// discrete values taken
 														// by attributes
-
+	int temp;
 	/**
 	 * Answers static questions about decision trees.
 	 */
@@ -39,8 +39,9 @@ public class DecisionTreeImpl extends DecisionTree {
 		this.attributes = train.attributes;
 		this.attributeValues = train.attributeValues;
 		this.instances = train.instances;
-		// TODO: add code here
-		buildTree(this.instances, this.attributes, null, -1);
+		ArrayList<String> attributesLeft = new ArrayList<String>();
+
+		root = buildTree(this.instances, attributesLeft, null, null);
 	}
 
 	/**
@@ -88,7 +89,8 @@ public class DecisionTreeImpl extends DecisionTree {
 			value = "ROOT";
 		} else{
 			String parentAttribute = attributes.get(parent.attribute);
-			value = attributeValues.get(parentAttribute).get(p.parentAttributeValue);
+			List<String> debug = attributeValues.get(parentAttribute);
+			value = debug.get(p.parentAttributeValue);
 		}
 		sb.append(value);
 		if (p.terminal) {
@@ -105,46 +107,152 @@ public class DecisionTreeImpl extends DecisionTree {
 
 	@Override
 	public void rootInfoGain(DataSet train) {
-
-		
 		this.labels = train.labels;
 		this.attributes = train.attributes;
 		this.attributeValues = train.attributeValues;
-		// TODO: add code here
+		int numOfAttributes;
+		double conditionalEntropy, entropy, mutualInfo;
+		entropy = calculateEntropy(train.instances, train.labels.size());
+		mutualInfo = 0.0;
+		
+		for (int i = 0; i < train.attributes.size(); i++) {
+			numOfAttributes = train.attributeValues.get(train.attributes.get(i)).size();
+			conditionalEntropy = calculateConditionalEntropy(i, train.instances, numOfAttributes, train.labels.size());
+			
+			mutualInfo = entropy - conditionalEntropy;
+			System.out.printf(train.attributes.get(i) + " %.5f\n", mutualInfo);
+		}
+		
 	}
 	
-	private DecTreeNode buildTree(List<Instance> instances, List<String> attrRemaining, List<Instance> parentInst, Integer parentAtt){
+	private DecTreeNode buildTree(List<Instance> instances, List<String> attrRemaining, List<Instance> parentInstances, DecTreeNode parent){
 		int winningLabel;
 		DecTreeNode curr;
-		int attrIndex;
-		
+		List<String> newListOfAttrs;
+		temp++;
+		System.out.println("times calling build tree = " + temp);
 		/*If we are out of training examples, return the overall majority vote*/
 	    if(instances.isEmpty()){
-	    	winningLabel = getMajorityVote(instances);
-	        return new DecTreeNode(winningLabel, null, parentAtt, true);
+	    	winningLabel = getMajorityVote(parentInstances);
+	        return new DecTreeNode(winningLabel, null, parent.attribute, true);
 	    } 
 	    /*If all instances have the same label, then the majority vote is that label*/
 	    else if(allInstancesHaveSameLabel(instances)){
 	        /*Since all remaining instances have same label, pick one*/
 	    	winningLabel = instances.get(0).label;
-	        return new DecTreeNode(winningLabel, null, parentAtt, true);
+	        return new DecTreeNode(winningLabel, null, parent.attribute, true);
 	    } 
 	    /*If we are out of attributes, return majority vote in instances*/
 	    else if(attrRemaining.isEmpty()){
 	    	winningLabel = getMajorityVote(instances);
-	        return new DecTreeNode(winningLabel, null, parentAtt, true);
+	        return new DecTreeNode(winningLabel, null, parent.attribute, true);
 	    } 
 	    else {
-	        curr = highestInformationGain(instances, attrRemaining, parentAtt);
+	        curr = highestInformationGain(instances, attrRemaining, parent);
 	        
-	        
+	        /*Create a new list of attributes for the next recursive call*/
+	        newListOfAttrs = new ArrayList<String>();
+	        for(int j = 0; j < attrRemaining.size(); j++){
+	        	if(j != curr.attribute){
+	        		newListOfAttrs.add(Integer.toString(j));
+	        	}
+	        }
+	        //for(int k = 0; k < attrRemaining.size(); k++){
+	        for(int k = 0; k < attributeValues.get(attributes.get(curr.attribute)).size(); k++){
+	            List<Instance> examples = new ArrayList<Instance>();
+	            for(Instance item : instances){
+	            	if(item.attributes.get(curr.attribute) == k)
+	            		examples.add(item);
+	            }
+	            DecTreeNode subtree = buildTree(examples, newListOfAttrs, instances, curr);
+	            curr.children.add(subtree);
+	        }
 	        return curr;
 	    }
 	}
 	
-	private DecTreeNode highestInformationGain(List<Instance> inst, List<String> attrRemaining, Integer parentAtt) {
-		// TODO Auto-generated method stub
-		return null;
+	private DecTreeNode highestInformationGain(List<Instance> inst, List<String> attrRemaining, DecTreeNode parent) {
+	    double entropy = -1, conditionalEntropy = -1;
+	    int highestEntropy = -1;
+	    double highestInfoGain = -1, infoGain = -1;
+
+	    //calculate entropy
+	    entropy = calculateEntropy(inst, labels.size());
+	    
+	    for(int i = 0; i < attrRemaining.size(); i++){
+	    	//conditionalEntropy = calculateConditionalEntropy(i, inst, attrRemaining.size(), labels.size());
+	    	conditionalEntropy = calculateConditionalEntropy(i, inst, attributeValues.size(), labels.size());
+	    	
+	    	infoGain = entropy - conditionalEntropy;
+	    	if(infoGain > highestInfoGain){
+	    		highestInfoGain = infoGain;
+	    		highestEntropy = i;
+	    	}
+	    }
+	    if(parent == null){
+	    	return new DecTreeNode(getMajorityVote(inst), highestEntropy, -1, (false || (attrRemaining.size() == 1)));
+	    }
+	    else{
+	    	return new DecTreeNode(getMajorityVote(inst), highestEntropy, parent.attribute, false);
+	    }
+	}
+	
+	private double calculateConditionalEntropy(int attributeId, List<Instance> instances, int numberOfAttributes, int numberOfLabels){
+		int totalInstances = instances.size();
+		int index;
+		int[] count = new int[numberOfAttributes];
+		double conditionalEntropy = 0;
+		double countOfAttr, prob;
+		double entropyBasedOnConditional;
+		double instanceSize = (double) instances.size();
+		ArrayList<ArrayList<Instance>> copyOfLabel = new ArrayList<ArrayList<Instance>>();
+		
+		//Create new empty lists
+		for (int i = 0; i < numberOfAttributes; i++) {
+			copyOfLabel.add(new ArrayList<Instance>());
+		}
+		/*Count the number of attributes*/
+		if(temp == 12){}
+		for (Instance item : instances) {
+			index = item.attributes.get(attributeId);
+			count[index]++;
+			copyOfLabel.get(index).add(item);
+		}
+		/*for each label, calculate the probability and add it to the total entropy*/
+		for (int i = 0; i < count.length; i++) {
+			if (totalInstances != 0 && count[i] != 0) {
+				countOfAttr = (double) count[i];
+				prob = countOfAttr/instanceSize; 
+				//calculate the entropy for the given attribute
+				entropyBasedOnConditional = calculateEntropy(copyOfLabel.get(i), numberOfLabels);
+				conditionalEntropy += prob * entropyBasedOnConditional;
+			}
+		}
+		return conditionalEntropy;
+	}
+	
+	private double calculateEntropy(List<Instance> instances, int numberOfLabels){
+		double entropy = 0, prob = 0;
+		int[] count = new int[numberOfLabels];
+		final double log2 = Math.log10(2);
+		double countOfAttr;
+		double instanceSize = (double) instances.size();
+		
+		//get the number of label occurrences in the instances
+		for (Instance instance : instances) {
+			count[instance.label]++;
+		}
+		
+		/*for each label, calculate the probability and add it to the total entropy*/
+		for (int i = 0; i < count.length; i++) {
+			if (count[i] != 0 && !(instances.isEmpty())) {
+				countOfAttr = (double) count[i];
+				prob = countOfAttr / instanceSize;
+				entropy += prob * Math.log10(prob) / log2;
+			}
+		}
+		entropy = entropy * -1;
+		return entropy;
 	}
 	
 	private Integer getMajorityVote(List<Instance> instances){
